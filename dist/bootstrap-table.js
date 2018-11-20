@@ -924,7 +924,8 @@
             }
 
             if (that.options.sortable && $this.parent().data().sortable) {
-                that.onSort(event);
+                if (!event.target.matches(".noaction"))
+                    {that.onSort(event);};
             }
         });
 
@@ -932,7 +933,8 @@
             if (that.options.sortable && $(this).data().sortable) {
                 var code = event.keyCode || event.which;
                 if (code == 13) { //Enter keycode
-                    that.onSort(event);
+                    if (!event.target.matches(".noaction"))
+                        {that.onSort(event);};
                 }
             }
         });
@@ -1261,7 +1263,7 @@
                 sprintf('<div class="%s-%s search">', bs.pullClass, this.options.searchAlign),
                 sprintf('<input class="form-control' +
                     sprintf(' input-%s', this.options.iconSize) +
-                    '" type="text" placeholder="%s">',
+                    '" type="text" id="bootstrapSearch" placeholder="%s">',
                     this.options.formatSearch()),
                 '</div>');
 
@@ -1301,9 +1303,11 @@
             $(event.currentTarget).val(text);
         }
 
-        if (text === this.searchText) {
-            return;
-        }
+        // Allow to trigger the search even if the query hasn't changed
+        //if (text === this.searchText) {
+        //    return;
+        //}
+
         this.searchText = text;
         this.options.searchText = text;
 
@@ -1318,6 +1322,69 @@
         }
         this.trigger('search', text);
     };
+
+    BootstrapTable.prototype.searchByCol = function (data, that) {
+        var search_boxes = document.getElementsByClassName("detailedSearch");
+        var query_by_col = {}
+        var keys = []
+        var search_s = []
+        for (var i = 0; i < search_boxes.length; i++){
+            // derive the column name from the id: ids may be "search_name" where column name is "name".
+            var val = search_boxes[i].value
+            if (val != "") {
+                keys.push(search_boxes[i].id.substr(7));
+                var s = val && (that.options.escape ?
+                escapeHTML(val) : val).toLowerCase();
+                search_s.push(s);
+            };
+        }
+
+        that.NonNullSearchCols = keys.length
+
+        data = keys.length > 0 ? $.grep(data, function (item, i) {
+            // assume AND filtering:
+            var pos_rets = 0
+            for (var j = 0; j < keys.length; j++) {
+
+                var key = keys[j];
+                var column = that.columns[that.fieldsColumnsIndex[key]];
+                var value;
+
+                if (typeof key === 'string') {
+                    value = item;
+                    var props = key.split('.');
+                    for (var prop_index = 0; prop_index < props.length; prop_index++) {
+                        if (value[props[prop_index]] != null) {
+                            value = value[props[prop_index]];
+                        }
+                    }
+
+                    // Fix #142: respect searchForamtter boolean
+                    if (column && column.searchFormatter) {
+                        value = calculateObjectValue(column,
+                            that.header.formatters[j], [value, item, i], value);
+                    }
+                } else {
+                    value = item[key];
+                }
+
+                if (typeof value === 'string' || typeof value === 'number') {
+                    if (that.options.strictSearch) {
+                        if ((value + '').toLowerCase() === search_s[j]) {
+                            pos_rets += 1;
+                        }
+                    } else {
+                        if ((value + '').toLowerCase().indexOf(search_s[j]) !== -1) {
+                            pos_rets += 1;
+                        }
+                    }
+                }
+            }
+            return pos_rets == keys.length;
+        }) : data;
+        return data;
+
+    }
 
     BootstrapTable.prototype.initSearch = function () {
         var that = this;
@@ -1343,49 +1410,54 @@
                 return true;
             }) : this.options.data;
 
-            this.data = s ? $.grep(this.data, function (item, i) {
-                for (var j = 0; j < that.header.fields.length; j++) {
+            // detailed searching:
+            this.data = that.searchByCol(this.data, that);
 
-                    if (!that.header.searchables[j]) {
-                        continue;
-                    }
+            if (s != ''){
+                this.data = s ? $.grep(this.data, function (item, i) {
+                    for (var j = 0; j < that.header.fields.length; j++) {
 
-                    var key = $.isNumeric(that.header.fields[j]) ? parseInt(that.header.fields[j], 10) : that.header.fields[j];
-                    var column = that.columns[that.fieldsColumnsIndex[key]];
-                    var value;
+                        if (!that.header.searchables[j]) {
+                            continue;
+                        }
 
-                    if (typeof key === 'string') {
-                        value = item;
-                        var props = key.split('.');
-                        for (var prop_index = 0; prop_index < props.length; prop_index++) {
-                            if (value[props[prop_index]] != null) {
-                                value = value[props[prop_index]];
+                        var key = $.isNumeric(that.header.fields[j]) ? parseInt(that.header.fields[j], 10) : that.header.fields[j];
+                        var column = that.columns[that.fieldsColumnsIndex[key]];
+                        var value;
+
+                        if (typeof key === 'string') {
+                            value = item;
+                            var props = key.split('.');
+                            for (var prop_index = 0; prop_index < props.length; prop_index++) {
+                                if (value[props[prop_index]] != null) {
+                                    value = value[props[prop_index]];
+                                }
                             }
-                        }
 
-                        // Fix #142: respect searchForamtter boolean
-                        if (column && column.searchFormatter) {
-                            value = calculateObjectValue(column,
-                                that.header.formatters[j], [value, item, i], value);
-                        }
-                    } else {
-                        value = item[key];
-                    }
-
-                    if (typeof value === 'string' || typeof value === 'number') {
-                        if (that.options.strictSearch) {
-                            if ((value + '').toLowerCase() === s) {
-                                return true;
+                            // Fix #142: respect searchForamtter boolean
+                            if (column && column.searchFormatter) {
+                                value = calculateObjectValue(column,
+                                    that.header.formatters[j], [value, item, i], value);
                             }
                         } else {
-                            if ((value + '').toLowerCase().indexOf(s) !== -1) {
-                                return true;
+                            value = item[key];
+                        }
+
+                        if (typeof value === 'string' || typeof value === 'number') {
+                            if (that.options.strictSearch) {
+                                if ((value + '').toLowerCase() === s) {
+                                    return true;
+                                }
+                            } else {
+                                if ((value + '').toLowerCase().indexOf(s) !== -1) {
+                                    return true;
+                                }
                             }
                         }
                     }
-                }
-                return false;
-            }) : this.data;
+                    return false;
+                }) : this.data;
+            }
         }
     };
 
@@ -2509,7 +2581,7 @@
 
     BootstrapTable.prototype.getData = function (useCurrentPage) {
         var data = this.options.data;
-        if (this.searchText || this.options.sortName || !$.isEmptyObject(this.filterColumns) || !$.isEmptyObject(this.filterColumnsPartial)) {
+        if (this.searchText || this.options.sortName || !$.isEmptyObject(this.filterColumns) || !$.isEmptyObject(this.filterColumnsPartial) || this.NonNullSearchCols != 0) {
             data = this.data;
         }
 
